@@ -14,6 +14,7 @@
     "build": "npm run build --workspace apps/api && npm run build --workspace apps/web",
     "typecheck": "npm run typecheck --workspace apps/api && npm run typecheck --workspace apps/web",
     "test": "npm run test --workspace apps/api",
+    "prisma:generate": "XDG_CACHE_HOME=${XDG_CACHE_HOME:-$PWD/.cache} npm run prisma:generate --workspace apps/api",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "db:migrate": "npm run prisma:migrate --workspace apps/api",
