@@ -1,0 +1,456 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  READ_ONLY
+  STAFF
+}
+
+enum SyncProvider {
+  SERVICEM8
+  QUICKBOOKS
+  SUPPLIER_INBOX
+}
+
+enum SyncMode {
+  MOCK
+  LIVE
+}
+
+enum SyncRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+  PARTIAL
+}
+
+enum MatchType {
+  AUTO_JOB_REFERENCE
+  AUTO_CUSTOMER_NAME
+  FUZZY_MATCH
+  MANUAL
+  SPLIT
+  IGNORED
+}
+
+enum MatchStatus {
+  MATCHED
+  POSSIBLE_MATCH
+  UNMATCHED
+  MANUALLY_CONFIRMED
+  IGNORED
+}
+
+enum SupplierInvoiceStatus {
+  RECEIVED
+  PARSED
+  NEEDS_REVIEW
+  ASSIGNED
+  PARTIALLY_ASSIGNED
+  MANUALLY_CORRECTED
+  IGNORED
+  REMOVED
+  FAILED
+  POSSIBLE_DUPLICATE
+}
+
+enum SupplierAllocationType {
+  FULL_INVOICE
+  PARTIAL_AMOUNT
+  PERCENTAGE
+  LINE_ITEMS
+  MANUAL
+}
+
+enum MaterialCostSource {
+  DEFAULT_APPROVED_SUPPLIER_THEN_SERVICEM8
+  SUPPLIER_INVOICES_ONLY
+  SERVICEM8_MANUAL_ONLY
+  SUPPLIER_PLUS_MANUAL
+  MANUAL_DASHBOARD_OVERRIDE
+  HIGHER_OF_SUPPLIER_OR_SERVICEM8
+  EXCLUDE_TEMPORARILY
+}
+
+model User {
+  id                       String                       @id @default(cuid())
+  name                     String
+  email                    String                       @unique
+  passwordHash             String
+  role                     UserRole                     @default(STAFF)
+  isActive                 Boolean                      @default(true)
+  twoFactorEnabled         Boolean                      @default(false)
+  totpSecret               String?
+  lastLoginAt              DateTime?
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+  permissions              UserPermission[]
+  auditLogs                AuditLog[]
+  manualOverrides          ManualOverride[]
+  manuallyConfirmedMatches JobInvoiceMatch[]            @relation("MatchConfirmedBy")
+  supplierAssignments      SupplierInvoice[]            @relation("SupplierInvoiceAssignedBy")
+  supplierAllocations      SupplierInvoiceAllocation[]   @relation("SupplierInvoiceAllocationAssignedBy")
+  syncLogs                 SyncLog[]                     @relation("SyncTriggeredBy")
+}
+
+model UserPermission {
+  id            String   @id @default(cuid())
+  userId        String
+  permissionKey String
+  allowed       Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionKey])
+  @@index([permissionKey])
+}
+
+model Job {
+  id                       String                    @id @default(cuid())
+  serviceM8JobId           String?                   @unique
+  jobName                  String
+  jobNumber                String?
+  customerName             String
+  customerId               String?
+  address                  String?
+  status                   String
+  jobDate                  DateTime?
+  completionDate           DateTime?
+  createdAtServiceM8       DateTime?
+  updatedAtServiceM8       DateTime?
+  leadSource               String?
+  jobType                  String?
+  materialsCostServiceM8   Decimal                   @default(0) @db.Decimal(12, 2)
+  subcontractorCost        Decimal                   @default(0) @db.Decimal(12, 2)
+  estimatedHours           Decimal?                  @db.Decimal(10, 2)
+  estimatedMaterials       Decimal?                  @db.Decimal(12, 2)
+  quotedValue              Decimal?                  @db.Decimal(12, 2)
+  totalTimeMinutes         Int                       @default(0)
+  materialCostSource       MaterialCostSource        @default(DEFAULT_APPROVED_SUPPLIER_THEN_SERVICEM8)
+  manualMaterialOverride   Decimal?                  @db.Decimal(12, 2)
+  manualMaterialAdjustment Decimal                   @default(0) @db.Decimal(12, 2)
+  serviceM8Payload         Json?
+  notes                    String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  invoiceMatches           JobInvoiceMatch[]
+  timeEntries              TimeEntry[]
+  linkedExpenses           Expense[]
+  assignedSupplierInvoices SupplierInvoice[]          @relation("SupplierInvoiceAssignedJob")
+  supplierLineItems        SupplierInvoiceLineItem[]  @relation("SupplierInvoiceLineItemJob")
+  supplierAllocations      SupplierInvoiceAllocation[]
+
+  @@index([jobDate])
+  @@index([completionDate])
+  @@index([status])
+  @@index([customerName])
+  @@index([leadSource])
+  @@index([jobType])
+  @@index([jobNumber])
+}
+
+model Invoice {
+  id                    String             @id @default(cuid())
+  quickBooksInvoiceId   String?            @unique
+  invoiceNumber         String
+  customerName          String
+  customerId            String?
+  invoiceDate           DateTime
+  dueDate               DateTime?
+  totalExVat            Decimal            @default(0) @db.Decimal(12, 2)
+  vatAmount             Decimal            @default(0) @db.Decimal(12, 2)
+  totalIncVat           Decimal            @default(0) @db.Decimal(12, 2)
+  balanceDue            Decimal            @default(0) @db.Decimal(12, 2)
+  paymentStatus         String
+  reference             String?
+  memo                  String?
+  createdAtQuickBooks   DateTime?
+  updatedAtQuickBooks   DateTime?
+  quickBooksPayload     Json?
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+  payments              Payment[]
+  jobMatches            JobInvoiceMatch[]
+
+  @@index([invoiceDate])
+  @@index([customerName])
+  @@index([invoiceNumber])
+}
+
+model Payment {
+  id                  String   @id @default(cuid())
+  quickBooksPaymentId String?  @unique
+  invoiceId           String?
+  paymentDate         DateTime
+  amount              Decimal  @default(0) @db.Decimal(12, 2)
+  paymentMethod       String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  invoice             Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([invoiceId])
+  @@index([paymentDate])
+}
+
+model Expense {
+  id                    String   @id @default(cuid())
+  quickBooksExpenseId    String?  @unique
+  supplierName           String
+  expenseDate            DateTime
+  accountName            String
+  accountType            String
+  category               String?
+  dashboardCategory      String
+  description            String?
+  amountExVat            Decimal  @default(0) @db.Decimal(12, 2)
+  vatAmount              Decimal  @default(0) @db.Decimal(12, 2)
+  amountIncVat           Decimal  @default(0) @db.Decimal(12, 2)
+  paymentStatus          String?
+  reference              String?
+  linkedCustomerName     String?
+  linkedJobId            String?
+  createdAtQuickBooks    DateTime?
+  updatedAtQuickBooks    DateTime?
+  quickBooksPayload      Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+  linkedJob              Job?     @relation(fields: [linkedJobId], references: [id], onDelete: SetNull)
+
+  @@index([expenseDate])
+  @@index([dashboardCategory])
+  @@index([accountName])
+  @@index([linkedJobId])
+}
+
+model JobInvoiceMatch {
+  id                        String      @id @default(cuid())
+  jobId                     String
+  invoiceId                 String
+  matchType                 MatchType
+  confidenceScore           Float?
+  status                    MatchStatus @default(POSSIBLE_MATCH)
+  manuallyConfirmedByUserId String?
+  notes                     String?
+  createdAt                 DateTime    @default(now())
+  updatedAt                 DateTime    @updatedAt
+  job                       Job         @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  invoice                   Invoice     @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  manuallyConfirmedBy       User?       @relation("MatchConfirmedBy", fields: [manuallyConfirmedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([jobId, invoiceId])
+  @@index([invoiceId, status])
+  @@index([jobId, status])
+  @@index([matchType])
+}
+
+model TimeEntry {
+  id                String    @id @default(cuid())
+  serviceM8BookingId String?  @unique
+  jobId             String
+  staffId           String?
+  staffName         String
+  startTime         DateTime?
+  endTime           DateTime?
+  durationMinutes   Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  job               Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([staffId])
+  @@index([staffName])
+}
+
+model Staff {
+  id                String   @id @default(cuid())
+  serviceM8StaffId  String?  @unique
+  name              String
+  email             String?
+  active            Boolean  @default(true)
+  hourlyCostRate    Decimal? @db.Decimal(10, 2)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([name])
+  @@index([active])
+}
+
+model SupplierInvoice {
+  id                      String                       @id @default(cuid())
+  supplierName            String?
+  supplierEmail           String?
+  invoiceNumber           String?
+  invoiceDate             DateTime?
+  reference               String?
+  netAmount               Decimal?                     @db.Decimal(12, 2)
+  vatAmount               Decimal?                     @db.Decimal(12, 2)
+  grossAmount             Decimal?                     @db.Decimal(12, 2)
+  carriageNetAmount       Decimal?                     @db.Decimal(12, 2)
+  currency                String                       @default("GBP")
+  extractionStatus        SupplierInvoiceStatus        @default(RECEIVED)
+  extractionConfidence    Float?
+  matchingConfidence      Float?
+  reviewReason            String?
+  sourceEmailId           String?
+  sourceEmailSubject      String?
+  sourceEmailReceivedAt   DateTime?
+  attachmentFilename      String?
+  attachmentStoragePath   String?
+  fileHash                String?
+  assignedJobId           String?
+  assignedByUserId        String?
+  assignedAt              DateTime?
+  isDuplicateSuspected    Boolean                      @default(false)
+  isIncludedInJobCosting  Boolean                      @default(false)
+  notes                   String?
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
+  assignedJob             Job?                         @relation("SupplierInvoiceAssignedJob", fields: [assignedJobId], references: [id], onDelete: SetNull)
+  assignedBy              User?                        @relation("SupplierInvoiceAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+  lineItems               SupplierInvoiceLineItem[]
+  allocations             SupplierInvoiceAllocation[]
+
+  @@index([extractionStatus])
+  @@index([assignedJobId])
+  @@index([supplierName, invoiceNumber])
+  @@index([fileHash])
+  @@index([sourceEmailReceivedAt])
+}
+
+model SupplierInvoiceLineItem {
+  id                String           @id @default(cuid())
+  supplierInvoiceId String
+  productCode       String?
+  description       String
+  quantity          Decimal?         @db.Decimal(12, 3)
+  unitPriceExVat    Decimal?         @db.Decimal(12, 2)
+  lineTotalExVat    Decimal?         @db.Decimal(12, 2)
+  vatRate           Decimal?         @db.Decimal(5, 2)
+  category          String?
+  assignedJobId     String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  supplierInvoice   SupplierInvoice  @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+  assignedJob       Job?             @relation("SupplierInvoiceLineItemJob", fields: [assignedJobId], references: [id], onDelete: SetNull)
+
+  @@index([supplierInvoiceId])
+  @@index([assignedJobId])
+}
+
+model SupplierInvoiceAllocation {
+  id                String                 @id @default(cuid())
+  supplierInvoiceId String
+  jobId             String
+  amountExVat       Decimal                @default(0) @db.Decimal(12, 2)
+  allocationType    SupplierAllocationType
+  percentage        Decimal?               @db.Decimal(6, 3)
+  notes             String?
+  assignedByUserId  String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  supplierInvoice   SupplierInvoice        @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+  job               Job                    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  assignedBy        User?                  @relation("SupplierInvoiceAllocationAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([supplierInvoiceId])
+  @@index([jobId])
+}
+
+model SyncLog {
+  id                String        @id @default(cuid())
+  source            SyncProvider
+  status            SyncRunStatus
+  startedAt         DateTime      @default(now())
+  completedAt       DateTime?
+  recordsCreated    Int           @default(0)
+  recordsUpdated    Int           @default(0)
+  errorMessage      String?
+  details           Json?
+  triggeredByUserId String?
+  createdAt         DateTime      @default(now())
+  triggeredBy       User?         @relation("SyncTriggeredBy", fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+
+  @@index([source, startedAt])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String
+  entityType String
+  entityId   String?
+  oldValue   Json?
+  newValue   Json?
+  reason     String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@index([action])
+}
+
+model ManualOverride {
+  id         String   @id @default(cuid())
+  entityType String
+  entityId   String
+  fieldName  String
+  oldValue   Json?
+  newValue   Json?
+  userId     String?
+  reason     String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId])
+  @@index([userId])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model QuickBooksCategoryMapping {
+  id                    String   @id @default(cuid())
+  quickBooksAccountName String
+  quickBooksAccountType String
+  dashboardCategory     String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([quickBooksAccountName, quickBooksAccountType])
+  @@index([dashboardCategory])
+}
+
+model IntegrationConnection {
+  id                    String       @id @default(cuid())
+  provider              SyncProvider @unique
+  mode                  SyncMode     @default(MOCK)
+  status                String?
+  accessTokenEncrypted  String?
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  realmId               String?
+  baseUrl               String?
+  lastCursor            String?
+  lastSuccessfulSyncAt  DateTime?
+  lastAttemptAt         DateTime?
+  lastError             String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+}
