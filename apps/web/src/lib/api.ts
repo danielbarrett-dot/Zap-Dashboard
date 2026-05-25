@@ -1,9 +1,11 @@
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 
-type FetchOptions = RequestInit & {
+type FetchOptions = Omit<RequestInit, "credentials"> & {
   query?: Record<string, string | number | undefined | null>;
 };
+
+const API_REQUEST_CREDENTIALS: RequestCredentials = "include";
 
 export class ApiError extends Error {
   status: number;
@@ -29,13 +31,17 @@ export const buildUrl = (path: string, query?: FetchOptions["query"]) => {
 };
 
 export async function apiFetch<T>(path: string, options: FetchOptions = {}): Promise<T> {
-  const response = await fetch(buildUrl(path, options.query), {
-    ...options,
-    credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    }
+  const { query, headers, ...requestOptions } = options;
+  const requestHeaders = new Headers(headers);
+
+  if (!requestHeaders.has("Content-Type")) {
+    requestHeaders.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(buildUrl(path, query), {
+    ...requestOptions,
+    credentials: API_REQUEST_CREDENTIALS,
+    headers: requestHeaders
   });
 
   if (response.status === 204) {

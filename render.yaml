@@ -101,7 +101,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        sync: false
+        value: https://zap-dashboard-api.onrender.com/api
 
   - type: worker
     name: zap-electrical-sync-worker
