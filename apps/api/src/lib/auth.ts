@@ -28,11 +28,13 @@ export const signAuthToken = (payload: AuthTokenPayload) =>
 export const verifyAuthToken = (token: string) =>
   jwt.verify(token, env.JWT_SECRET) as AuthTokenPayload;
 
-const buildBaseCookieOptions = (): CookieOptions => ({
+type CookieRuntime = Pick<typeof env, "COOKIE_DOMAIN" | "isProduction">;
+
+export const buildBaseCookieOptions = (runtime: CookieRuntime = env): CookieOptions => ({
   httpOnly: true,
-  sameSite: "lax",
-  secure: env.isProduction,
-  domain: env.COOKIE_DOMAIN,
+  sameSite: runtime.isProduction ? "none" : "lax",
+  secure: runtime.isProduction,
+  domain: runtime.COOKIE_DOMAIN,
   path: "/"
 });
 
@@ -41,16 +43,32 @@ const buildLoginCookieOptions = (): CookieOptions => ({
   maxAge: 1000 * 60 * 60 * 12
 });
 
-const buildClearCookieHeader = () => {
-  const options = buildBaseCookieOptions();
+const formatSameSite = (sameSite: CookieOptions["sameSite"]) => {
+  if (sameSite === true) {
+    return "Strict";
+  }
+
+  if (sameSite === undefined || sameSite === false) {
+    return undefined;
+  }
+
+  return sameSite.charAt(0).toUpperCase() + sameSite.slice(1);
+};
+
+export const buildClearCookieHeader = (runtime: CookieRuntime = env) => {
+  const options = buildBaseCookieOptions(runtime);
+  const sameSite = formatSameSite(options.sameSite);
   const parts = [
     `${AUTH_COOKIE}=`,
     "Max-Age=0",
     `Path=${options.path}`,
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
-    "HttpOnly",
-    "SameSite=Lax"
+    "HttpOnly"
   ];
+
+  if (sameSite) {
+    parts.push(`SameSite=${sameSite}`);
+  }
 
   if (options.domain) {
     parts.push(`Domain=${options.domain}`);

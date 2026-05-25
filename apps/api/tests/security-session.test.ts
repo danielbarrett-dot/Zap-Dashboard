@@ -89,6 +89,26 @@ test("logout cookie clearing expires zap_auth immediately without frontend-reada
   assert.doesNotMatch(setCookie, /Max-Age=43200/i);
 });
 
+test("production auth cookies support cross-site Render frontend and API domains", async () => {
+  const { buildBaseCookieOptions, buildClearCookieHeader } = await import("../src/lib/auth.js");
+  const runtime = {
+    COOKIE_DOMAIN: undefined,
+    isProduction: true
+  };
+
+  const options = buildBaseCookieOptions(runtime);
+  const clearCookieHeader = buildClearCookieHeader(runtime);
+
+  assert.equal(options.httpOnly, true);
+  assert.equal(options.sameSite, "none");
+  assert.equal(options.secure, true);
+  assert.equal(options.path, "/");
+  assert.match(clearCookieHeader, /SameSite=None/i);
+  assert.match(clearCookieHeader, /Secure/i);
+  assert.match(clearCookieHeader, /HttpOnly/i);
+  assert.match(clearCookieHeader, /Max-Age=0/i);
+});
+
 test("staff is blocked from restricted financial, supplier, admin, and sync endpoints", async () => {
   const protectedReads: Array<Parameters<typeof import("../src/middleware/auth.js").requireRole>> = [
     ["ADMIN", "MANAGER", "READ_ONLY"],
